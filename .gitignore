@@ -1,0 +1,7 @@
+.vs/
+x64/
+src/x64/
+src/Release/
+bin/
+*.aps
+._*
