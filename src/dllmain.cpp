@@ -21,6 +21,7 @@
 
 #include <shellapi.h>
 #include <string>
+#include <string_view>
 #include <typeinfo>
 
 namespace {
@@ -28,7 +29,8 @@ namespace {
 auto RealShellExecuteA = ShellExecuteA;
 auto RealShellExecuteW = ShellExecuteW;
 
-#define FORBIDDEN_PREFIX(x) x ## "steam://forceinputappid/"
+#define NEUTRAL_CSTR(T, s) ( \
+    std::is_same<T, char>::value ? (T *const)s : (T *const)(L ## s))
 
 #pragma warning(push)
 #pragma warning(disable : 6276)
@@ -36,31 +38,28 @@ auto RealShellExecuteW = ShellExecuteW;
 template <class T>
 bool isForbiddenExecution(const T *lpFile) {
     const std::basic_string<T> file{ lpFile };
-    constexpr T *cstrPrefix{
-            std::is_same<T, char>::value ?
-                (T *const)FORBIDDEN_PREFIX("") : (T *const)FORBIDDEN_PREFIX(L) };
+    constexpr auto cstrPrefix{ NEUTRAL_CSTR(T, "steam://forceinputappid/")};
     return (file.find(cstrPrefix) == 0);
 }
 
 #pragma warning(pop)
 
-HINSTANCE ReplacementShellExecuteA(
-        _In_opt_ HWND hwnd, _In_opt_ LPCSTR lpOperation, _In_ LPCSTR lpFile, _In_opt_ LPCSTR lpParameters,
-        _In_opt_ LPCSTR lpDirectory, _In_ INT nShowCmd) {
+template <class T, class U, U realFunction>
+HINSTANCE ReplacementShellExecute(
+        _In_opt_ HWND hwnd,
+        _In_opt_ const T *lpOperation,
+        _In_ const T *lpFile,
+        _In_opt_ const T *lpParameters,
+        _In_opt_ const T *lpDirectory,
+        _In_ INT nShowCmd) {
     if (isForbiddenExecution(lpFile)) {
         return 0;
     }
-    return RealShellExecuteA(hwnd, lpOperation, lpFile, lpParameters, lpDirectory, nShowCmd);
+    return realFunction(hwnd, lpOperation, lpFile, lpParameters, lpDirectory, nShowCmd);
 }
 
-HINSTANCE ReplacementShellExecuteW(
-        _In_opt_ HWND hwnd, _In_opt_ LPCWSTR lpOperation, _In_ LPCWSTR lpFile, _In_opt_ LPCWSTR lpParameters,
-        _In_opt_ LPCWSTR lpDirectory, _In_ INT nShowCmd) {
-    if (isForbiddenExecution(lpFile)) {
-        return 0;
-    }
-    return RealShellExecuteW(hwnd, lpOperation, lpFile, lpParameters, lpDirectory, nShowCmd);
-}
+auto ReplacementShellExecuteA = &ReplacementShellExecute<char, decltype(ShellExecuteA), ShellExecuteA>;
+auto ReplacementShellExecuteW = &ReplacementShellExecute<wchar_t, decltype(ShellExecuteW), ShellExecuteW>;
 
 } // anonymous namespace
 
