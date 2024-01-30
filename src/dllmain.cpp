@@ -28,6 +28,7 @@ namespace {
 
 auto RealShellExecuteA = ShellExecuteA;
 auto RealShellExecuteW = ShellExecuteW;
+auto RealCreateProcessW = CreateProcessW;
 
 #define NEUTRAL_CSTR(T, s) ( \
     std::is_same<T, char>::value ? (T *const)s : (T *const)(L ## s))
@@ -38,7 +39,7 @@ auto RealShellExecuteW = ShellExecuteW;
 template <class T>
 bool isForbiddenExecution(const T *lpFile) {
     const std::basic_string<T> file{ lpFile };
-    constexpr auto cstrPrefix{ NEUTRAL_CSTR(T, "steam://forceinputappid/")};
+    constexpr auto cstrPrefix{ NEUTRAL_CSTR(T, "steam://forceinputappid/") };
     return (file.find(cstrPrefix) == 0);
 }
 
@@ -61,6 +62,26 @@ HINSTANCE ReplacementShellExecute(
 auto ReplacementShellExecuteA = &ReplacementShellExecute<char, decltype(ShellExecuteA), ShellExecuteA>;
 auto ReplacementShellExecuteW = &ReplacementShellExecute<wchar_t, decltype(ShellExecuteW), ShellExecuteW>;
 
+BOOL ReplacementCreateProcessW(
+        LPCWSTR lpApplicationName,
+        LPWSTR lpCommandLine,
+        LPSECURITY_ATTRIBUTES lpProcessAttributes,
+        LPSECURITY_ATTRIBUTES lpThreadAttributes,
+        BOOL bInheritHandles,
+        DWORD dwCreationFlags,
+        LPVOID lpEnvironment,
+        LPCWSTR lpCurrentDirectory,
+        LPSTARTUPINFOW lpStartupInfo,
+        LPPROCESS_INFORMATION lpProcessInformation) {
+    const auto view = std::wstring_view{ lpCommandLine };
+    if (view.find(L"steam.exe -- steam://forceinputappid/") != std::wstring_view::npos) {
+        return FALSE;
+    }
+    return RealCreateProcessW(lpApplicationName, lpCommandLine, lpProcessAttributes,
+        lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, lpCurrentDirectory,
+        lpStartupInfo, lpProcessInformation);
+}
+
 } // anonymous namespace
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID) {
@@ -69,9 +90,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID) {
         DisableThreadLibraryCalls(hModule);
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
-        DetourAttach(reinterpret_cast<PVOID *>(&RealShellExecuteA), ReplacementShellExecuteA);
-        DetourAttach(reinterpret_cast<PVOID *>(&RealShellExecuteW), ReplacementShellExecuteW);
-        const LONG error{ DetourTransactionCommit() };
+
+        // Versions of SpecialK before 01/22/2024 use ShellExecute{A,W} to invoke `steam://forceinputappid`.
+        DetourAttach(reinterpret_cast<void **>(&RealShellExecuteA), ReplacementShellExecuteA);
+        DetourAttach(reinterpret_cast<void **>(&RealShellExecuteW), ReplacementShellExecuteW);
+
+        // Versions of SpecialK on or after 01/22/2024 use CreateProcessW to invoke `steam://forceinputappid`.
+        // See https://github.com/SpecialKO/SpecialK/commit/8347b3af.
+        DetourAttach(reinterpret_cast<void **>(&RealCreateProcessW), ReplacementCreateProcessW);
+
+        const auto error = DetourTransactionCommit();
         if (error != NO_ERROR) {
             return FALSE;
         }
@@ -79,8 +107,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID) {
     case DLL_PROCESS_DETACH: {
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
-        DetourDetach(reinterpret_cast<PVOID *>(&RealShellExecuteA), ReplacementShellExecuteA);
-        DetourDetach(reinterpret_cast<PVOID *>(&RealShellExecuteW), ReplacementShellExecuteW);
+        DetourDetach(reinterpret_cast<void **>(&RealShellExecuteA), ReplacementShellExecuteA);
+        DetourDetach(reinterpret_cast<void **>(&RealShellExecuteW), ReplacementShellExecuteW);
+        DetourDetach(reinterpret_cast<void **>(&RealCreateProcessW), ReplacementCreateProcessW);
         DetourTransactionCommit();
     } break;
     case DLL_THREAD_ATTACH:
