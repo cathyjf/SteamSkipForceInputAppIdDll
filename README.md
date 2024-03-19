@@ -1,7 +1,7 @@
 # cathyjf/SteamSkipForceInputAppIdDll
 
 This respository builds a DLL that, when loaded into the address space of a
-process, prevents that process from using ShellExecute{A,W} to invoke the
+process, prevents that process from using CreateProcessW to invoke the
 `steam://forceinputappid` endpoint. Building the project generates both a
 32-bit and 64-bit version of the DLL.
 
@@ -15,7 +15,7 @@ some people who use Steam Input, SpecialK's invocation of the
    effect in Steam's Big Picture Mode.
 
 To resolve these issues, the SteamSkipForceInputAppIdDll{32,64}.dll file
-intercepts calls to ShellExecute{A,W} to block SpecialK from invoking the
+intercepts calls to CreateProcessW to block SpecialK from invoking the
 `steam://forceinputappid` endpoint.
 
 This project accomplishes a similar effect as a
